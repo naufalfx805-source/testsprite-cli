@@ -967,7 +967,8 @@ Write a self-contained failure-context bundle for a test's latest failing run
 
 Options:
   --out <dir>    Directory to write the §7 disk layout into (default: print
-                 wire envelope to stdout)
+                 wire envelope to stdout). Parent must exist, except under
+                 ./.testsprite/, which is created as needed.
   --failed-only  Trim to the failed step ±1. The bundle is already
                  failure-focused server-side, so this is usually a no-op; use
                  \`test steps <id>\` for the full run trail.

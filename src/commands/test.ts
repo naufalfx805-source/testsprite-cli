@@ -28,7 +28,7 @@ import {
   type WriteStream,
 } from 'node:fs';
 import { rename, stat, unlink } from 'node:fs/promises';
-import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Command } from 'commander';
 import { openInBrowser } from '../lib/browser.js';
@@ -14205,23 +14205,38 @@ export function resolveDefaultArtifactDir(runId: string, cwd: string = process.c
 }
 
 /**
- * Validate that the parent directory of `resolvedDir` exists and is a
- * directory. Surfaces `VALIDATION_ERROR` (exit 5) — matches the convention
- * from `closeOutputFile` for single-file `--out` flags (P4 D4 convention).
+ * Validate the `--out` bundle directory before any request goes out. Surfaces
+ * `VALIDATION_ERROR` (exit 5) — matches the convention from `closeOutputFile`
+ * for single-file `--out` flags (P4 D4 convention).
+ *
+ * The parent directory must already exist, so a mistyped `--out` fails here
+ * instead of quietly creating a new directory tree somewhere else. The one
+ * exception is a directory inside the project's own `.testsprite/` folder,
+ * where `test artifact get` writes by default and where the docs and the
+ * verify skill point `--out`: `writeBundle` creates the missing parents there,
+ * as it does for the default, so `--out ./.testsprite/runs/<run-id>/` behaves
+ * exactly like leaving `--out` off. Inside `.testsprite/`, the closest path
+ * that already exists must still be a directory.
  *
  * The bundle directory itself (`resolvedDir`) may or may not exist;
  * `writeBundle` creates it if absent.
  */
-export async function assertOutDirParentExists(resolvedDir: string): Promise<void> {
+export async function assertOutDirParentExists(
+  resolvedDir: string,
+  cwd: string = process.cwd(),
+): Promise<void> {
   const parent = dirname(resolvedDir);
+  const checked = isInsideProjectTestspriteDir(resolvedDir, cwd)
+    ? await closestExistingPath(parent)
+    : parent;
   let parentStat;
   try {
-    parentStat = await stat(parent);
+    parentStat = await stat(checked);
   } catch {
     throw localValidationError('out', `parent directory does not exist: ${parent}`);
   }
   if (!parentStat.isDirectory()) {
-    throw localValidationError('out', `parent path is not a directory: ${parent}`);
+    throw localValidationError('out', `parent path is not a directory: ${checked}`);
   }
   // Also guard against --out pointing at an existing FILE (not a dir).
   let targetStat;
@@ -14233,6 +14248,33 @@ export async function assertOutDirParentExists(resolvedDir: string): Promise<voi
   }
   if (!targetStat.isDirectory()) {
     throw localValidationError('out', `must point to a directory, not a file: ${resolvedDir}`);
+  }
+}
+
+/**
+ * True when `dir` lies inside `<cwd>/.testsprite/` (not the folder itself):
+ * the CLI's own per-project working directory.
+ */
+function isInsideProjectTestspriteDir(dir: string, cwd: string): boolean {
+  const rel = relative(join(cwd, '.testsprite'), dir);
+  return rel !== '' && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+}
+
+/** `target` itself when it exists, otherwise its closest existing ancestor. */
+async function closestExistingPath(target: string): Promise<string> {
+  let current = target;
+  for (;;) {
+    try {
+      await stat(current);
+      return current;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      const up = dirname(current);
+      // ENOTDIR means a path component is a file: keep climbing so the caller
+      // reports that file as "not a directory".
+      if ((code !== 'ENOENT' && code !== 'ENOTDIR') || up === current) return current;
+      current = up;
+    }
   }
 }
 
@@ -18514,7 +18556,8 @@ export function createTestArtifactCommand(deps: TestDeps): Command {
       '--out <dir>',
       [
         'Directory to write the §7 disk layout (default: ./.testsprite/runs/<run-id>/).',
-        'Parent must exist. The bundle dir itself is created if absent.',
+        'Parent must exist, except under ./.testsprite/, which is created as needed.',
+        'The bundle dir itself is created if absent.',
       ].join(' '),
     )
     .option(
@@ -18549,7 +18592,10 @@ function createTestFailureCommand(deps: TestDeps): Command {
     .description("Write a self-contained failure-context bundle for a test's latest failing run")
     .option(
       '--out <dir>',
-      'Directory to write the §7 disk layout into (default: print wire envelope to stdout)',
+      [
+        'Directory to write the §7 disk layout into (default: print wire envelope to stdout).',
+        'Parent must exist, except under ./.testsprite/, which is created as needed.',
+      ].join(' '),
     )
     .option(
       '--failed-only',

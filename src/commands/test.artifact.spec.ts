@@ -232,6 +232,44 @@ describe('assertOutDirParentExists', () => {
     await mkdir(existingDir);
     await expect(assertOutDirParentExists(existingDir)).resolves.toBeUndefined();
   });
+
+  it('accepts missing parents inside <cwd>/.testsprite/ without creating anything', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'cli-p4-tsdir-'));
+    const target = join(cwd, '.testsprite', 'runs', 'run_x');
+    await expect(assertOutDirParentExists(target, cwd)).resolves.toBeUndefined();
+    // Validation only: writeBundle creates the directories once the response
+    // has passed its integrity checks, never this pre-check.
+    expect(existsSync(join(cwd, '.testsprite'))).toBe(false);
+  });
+
+  it('keeps refusing a missing parent anywhere outside <cwd>/.testsprite/', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'cli-p4-tsdir-'));
+    for (const target of [
+      join(cwd, 'testsprite', 'runs', 'run_x'),
+      join(cwd, '.testsprite-old', 'runs', 'run_x'),
+      join(cwd, '.testsprite', '..', 'elsewhere', 'run_x'),
+    ]) {
+      await expect(assertOutDirParentExists(target, cwd)).rejects.toMatchObject({
+        code: 'VALIDATION_ERROR',
+        details: expect.objectContaining({
+          reason: expect.stringContaining('parent directory does not exist'),
+        }),
+      });
+    }
+  });
+
+  it('reports a .testsprite file in the way as "not a directory"', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'cli-p4-tsdir-'));
+    await writeFile(join(cwd, '.testsprite'), 'not a directory');
+    await expect(
+      assertOutDirParentExists(join(cwd, '.testsprite', 'runs', 'run_x'), cwd),
+    ).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR',
+      details: expect.objectContaining({
+        reason: `parent path is not a directory: ${join(cwd, '.testsprite')}`,
+      }),
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -316,6 +354,33 @@ describe('runArtifactGet', () => {
           failedOnly: false,
         },
         { credentialsPath, fetchImpl, stdout: line => out.push(line) },
+      );
+
+      const expectedDir = join(tmpDir, '.testsprite', 'runs', SAMPLE_RUN_ID);
+      expect(result.bundle!.dir).toBe(expectedDir);
+      expect(existsSync(join(expectedDir, 'meta.json'))).toBe(true);
+    } finally {
+      cwdSpy.mockRestore();
+    }
+  });
+
+  it('--out ./.testsprite/runs/<run-id>/ in a fresh project writes where the default does', async () => {
+    const { credentialsPath } = makeCreds();
+    const ctx = makeArtifactContext();
+    const tmpDir = await mkdtemp(join(tmpdir(), 'cli-p4-explicit-default-'));
+    const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(tmpDir);
+    try {
+      const result = await runArtifactGet(
+        {
+          profile: 'default',
+          output: 'json',
+          debug: false,
+          runId: SAMPLE_RUN_ID,
+          // The verify skill's spelling, before .testsprite/ exists.
+          out: `./.testsprite/runs/${SAMPLE_RUN_ID}/`,
+          failedOnly: false,
+        },
+        { credentialsPath, fetchImpl: makeFetch(() => ({ body: ctx })), stdout: () => {} },
       );
 
       const expectedDir = join(tmpDir, '.testsprite', 'runs', SAMPLE_RUN_ID);
@@ -929,6 +994,32 @@ describe('runFailureGet M2 non-regression (requireRunId is opt-in)', () => {
     const meta = JSON.parse(readFileSync(join(outDir, 'meta.json'), 'utf8'));
     expect(meta.runIdIfAvailable).toBeNull();
     expect(meta.testId).toBe('test_m2');
+  });
+
+  it('--out ./.testsprite/failure works in a fresh project (the README quick start)', async () => {
+    const { credentialsPath } = makeCreds();
+    const ctx = makeArtifactContext();
+    const tmpDir = await mkdtemp(join(tmpdir(), 'cli-p4-quickstart-'));
+    const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(tmpDir);
+    try {
+      const result = await runFailureGet(
+        {
+          profile: 'default',
+          output: 'json',
+          debug: false,
+          testId: 'test_fe',
+          out: './.testsprite/failure',
+          failedOnly: false,
+        },
+        { credentialsPath, fetchImpl: makeFetch(() => ({ body: ctx })), stdout: () => {} },
+      );
+
+      const expectedDir = join(tmpDir, '.testsprite', 'failure');
+      expect(result.bundle!.dir).toBe(expectedDir);
+      expect(existsSync(join(expectedDir, 'meta.json'))).toBe(true);
+    } finally {
+      cwdSpy.mockRestore();
+    }
   });
 });
 
