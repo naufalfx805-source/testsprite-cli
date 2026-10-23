@@ -12260,7 +12260,23 @@ interface CliRerunResult {
  * Batch / `--all`: `POST /tests/batch/rerun` → per-test runIds. With
  * `--wait`, fan-out poll under `--max-concurrency`. `deferred[]` → exit 7.
  */
+/**
+ * Refuse an explicitly empty `--filter`. An empty value (`--filter "$FILTER"`
+ * with an empty variable, `--filter=`) used to read as "no filter" and run,
+ * and bill, every test in the project. Omitting `--filter` still selects every
+ * test. Shared by `test run`, `test rerun` and `ci run`.
+ */
+export function assertFilterNotEmpty(filter: string | undefined): void {
+  if (filter === '') {
+    throw localValidationError(
+      'filter',
+      'must not be empty. Omit --filter to select every test, or pass the substring to narrow by',
+    );
+  }
+}
+
 function validateRerunOptions(opts: RunTestRerunOptions): boolean {
+  assertFilterNotEmpty(opts.nameFilter);
   // -------------------------------------------------------------------------
   // Input validation
   // -------------------------------------------------------------------------
@@ -15098,7 +15114,7 @@ export function createTestCommand(deps: TestDeps = {}): Command {
     )
     .option(
       '--filter <substr>',
-      'with --all: only run tests whose name contains this substring (case-insensitive)',
+      'with --all: only run tests whose name contains this substring (case-insensitive; must not be empty)',
     )
     .option(
       '--max-concurrency <n>',
@@ -15201,6 +15217,7 @@ export function createTestCommand(deps: TestDeps = {}): Command {
           'provide a <test-id>, or use --all with --project <id> or TESTSPRITE_PROJECT_ID',
         );
       }
+      assertFilterNotEmpty(cmdOpts.filter);
       // --filter is an --all-only narrowing flag (mirrors `test rerun --filter`).
       // Without --all it would be SILENTLY ignored while the explicit <test-id>
       // still runs — defeating the caller's narrowing intent. Reject early.
@@ -15557,7 +15574,7 @@ export function createTestCommand(deps: TestDeps = {}): Command {
     )
     .option(
       '--filter <substr>',
-      'with --all: only rerun tests whose name contains this substring (case-insensitive)',
+      'with --all: only rerun tests whose name contains this substring (case-insensitive; must not be empty)',
     )
     .option('--wait', 'block until terminal status or --timeout elapses', false)
     .option('--no-wait', 'detach without opening an automatic environment tunnel')

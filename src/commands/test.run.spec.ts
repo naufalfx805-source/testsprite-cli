@@ -8840,3 +8840,44 @@ describe('run output regressions', () => {
     },
   );
 });
+
+// ---------------------------------------------------------------------------
+// --filter "" is refused, never read as "no filter"
+// ---------------------------------------------------------------------------
+
+describe('test run --filter "" (an empty filter is not "no filter")', () => {
+  it.each([
+    ['--all', ['test', 'run', '--all', '--project', 'proj_1', '--filter', '']],
+    [
+      '--all --dry-run',
+      ['--dry-run', 'test', 'run', '--all', '--project', 'proj_1', '--filter', ''],
+    ],
+    ['a single test', ['test', 'run', 'test_x', '--filter', '']],
+  ])('refuses %s with exit 5 before any request', async (_label, argv) => {
+    const { Command } = await import('commander');
+    const { createTestCommand } = await import('./test.js');
+    const { credentialsPath } = makeCreds();
+    const fetchImpl = vi.fn<FetchImpl>(async () => {
+      throw new Error('no request expected');
+    });
+    const root = new Command('testsprite')
+      .option('--output <mode>')
+      .option('--dry-run')
+      .addCommand(
+        createTestCommand({
+          credentialsPath,
+          fetchImpl,
+          stdout: () => undefined,
+          stderr: () => undefined,
+          sleep: instantSleep,
+        }),
+      );
+    disableExits(root);
+    await expect(root.parseAsync(argv, { from: 'user' })).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR',
+      exitCode: 5,
+      details: expect.objectContaining({ field: 'filter' }),
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});

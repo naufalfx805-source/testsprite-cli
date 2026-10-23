@@ -1326,3 +1326,18 @@ describe('ci run telemetry facts', () => {
     expect(takeTelemetryExtras()).toMatchObject({ ciRunOutcome: 'empty' });
   });
 });
+
+describe('ci run --filter "" (an empty filter is not "no filter")', () => {
+  it.each([false, true])(
+    'refuses an empty filter with exit 5 before any request (dry-run: %s)',
+    async dryRun => {
+      const h = harness();
+      await expect(runCiRun({ ...h.opts, nameFilter: '', dryRun }, h.deps)).rejects.toMatchObject({
+        code: 'VALIDATION_ERROR',
+        exitCode: 5,
+        details: expect.objectContaining({ field: 'filter' }),
+      });
+      expect(h.calls).toEqual([]);
+    },
+  );
+});

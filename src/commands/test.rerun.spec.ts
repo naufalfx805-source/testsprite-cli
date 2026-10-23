@@ -6490,3 +6490,51 @@ it('uses polled run timing for batch rerun JUnit without changing JSON', async (
   expect(stdout[0]).not.toContain('durationSeconds');
   expect(stdout[0]).not.toContain('createdAt');
 });
+
+// ---------------------------------------------------------------------------
+// --filter "" is refused, never read as "no filter"
+// ---------------------------------------------------------------------------
+
+describe('test rerun --filter "" (an empty filter is not "no filter")', () => {
+  const base = {
+    testIds: [] as string[],
+    all: true,
+    projectId: 'proj_1',
+    wait: false,
+    timeoutSeconds: 600,
+    autoHeal: false,
+    autoHealExplicit: false,
+    skipDependencies: false,
+    maxConcurrency: 10,
+    output: 'json' as const,
+    profile: 'default',
+    debug: false,
+    verbose: false,
+  };
+  it.each([
+    ['--all', { ...base }],
+    ['--all --dry-run', { ...base, dryRun: true }],
+    ['a single test', { ...base, all: false, projectId: undefined, testIds: ['test_x'] }],
+  ])('refuses %s with exit 5 before any request', async (_label, opts) => {
+    const creds = makeCreds();
+    let networkCalled = false;
+    const fetchImpl = makeFetch(() => {
+      networkCalled = true;
+      return { status: 500, body: {} };
+    });
+    await expect(
+      runTestRerun({ ...opts, nameFilter: '' } as never, {
+        ...creds,
+        sleep: instantSleep,
+        fetchImpl,
+        stdout: () => undefined,
+        stderr: () => undefined,
+      }),
+    ).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR',
+      exitCode: 5,
+      details: expect.objectContaining({ field: 'filter' }),
+    });
+    expect(networkCalled).toBe(false);
+  });
+});

@@ -24,7 +24,12 @@ import {
 } from '../lib/ci-linkage.js';
 import { ciRefusalOutcome, recordTelemetryExtras } from '../lib/telemetry.js';
 import type { CliProject } from './project.js';
-import { runTestRunAll, type RunTestRunAllOptions, type TestDeps } from './test.js';
+import {
+  assertFilterNotEmpty,
+  runTestRunAll,
+  type RunTestRunAllOptions,
+  type TestDeps,
+} from './test.js';
 import { emitCiStepOutputs, type CiSummary } from '../lib/gh-output.js';
 import { previewEnvironmentName, readGithubRunContext } from '../lib/github-context.js';
 import type { CiGithubTrigger } from '../lib/runs.types.js';
@@ -1308,6 +1313,7 @@ export type CiRunOptions = Omit<
 export async function runCiRun(opts: CiRunOptions, deps: TestDeps = {}): Promise<void> {
   const env = deps.env ?? process.env;
   const stderr = deps.stderr ?? ((line: string) => process.stderr.write(`${line}\n`));
+  assertFilterNotEmpty(opts.nameFilter);
   if (opts.targetUrl !== undefined && opts.targetUrl.trim() === '') {
     throw localValidationError('target-url', 'must be a non-empty URL');
   }
@@ -1435,7 +1441,10 @@ export function createCiCommand(deps: CiDeps = {}): Command {
     .allowExcessArguments(false)
     .option('--project <id>', 'project id (defaults to TESTSPRITE_PROJECT_ID)')
     .option('--all', 'run all project tests (already the default)')
-    .option('--filter <substr>', 'only run tests whose name contains this substring')
+    .option(
+      '--filter <substr>',
+      'only run tests whose name contains this substring (must not be empty)',
+    )
     .option(
       '--env <name>',
       'the environment whose sign-in the run uses (unknown names fail). In a pull request, with --target-url, the run happens in a temporary clone of it at the preview address, named github-pr-<N> like a GitHub App run',
